@@ -1,6 +1,10 @@
 package logrus_fluent
 
 import (
+	"fmt"
+	"runtime"
+	"strings"
+
 	"github.com/Sirupsen/logrus"
 	"github.com/fluent/fluent-logger-golang/fluent"
 )
@@ -20,29 +24,31 @@ var defaultLevels = []logrus.Level{
 }
 
 type fluentHook struct {
-	host   string
-	port   int
-	levels []logrus.Level
+	host        string
+	port        int
+	application string
+	levels      []logrus.Level
 }
 
-func NewHook(host string, port int) *fluentHook {
+func NewHook(host string, port int, application string) *fluentHook {
 	return &fluentHook{
-		host:   host,
-		port:   port,
-		levels: defaultLevels,
+		host:        host,
+		port:        port,
+		application: application,
+		levels:      defaultLevels,
 	}
 }
 
-func getTagAndDel(entry *logrus.Entry) string {
+func getTagAndDel(entry *logrus.Entry, application string) string {
 	var v interface{}
 	var ok bool
 	if v, ok = entry.Data[TagField]; !ok {
-		return entry.Message
+		return fmt.Sprintf("%s.%s", application, entry.Level)
 	}
 
 	var val string
 	if val, ok = v.(string); !ok {
-		return entry.Message
+		return fmt.Sprintf("%s.%s", application, entry.Level)
 	}
 	delete(entry.Data, TagField)
 	return val
@@ -58,6 +64,26 @@ func setMessage(entry *logrus.Entry) {
 	}
 }
 
+func setCaller(entry *logrus.Entry, skip int) {
+	_, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		file = "???"
+		line = 0
+	} else {
+		lastSlash := strings.LastIndex(file, "/")
+		if lastSlash >= 0 {
+			folderSlash := strings.LastIndex(file[:lastSlash], "/")
+			if folderSlash >= 0 {
+				file = file[folderSlash+1:]
+			} else {
+				file = file[lastSlash+1:]
+			}
+		}
+	}
+
+	entry.Data["caller"] = fmt.Sprintf("%s:%d", file, line)
+}
+
 func (hook *fluentHook) Fire(entry *logrus.Entry) error {
 	logger, err := fluent.New(fluent.Config{
 		FluentHost: hook.host,
@@ -69,10 +95,12 @@ func (hook *fluentHook) Fire(entry *logrus.Entry) error {
 	defer logger.Close()
 
 	setLevelString(entry)
-	tag := getTagAndDel(entry)
+	tag := getTagAndDel(entry, hook.application)
 	if tag != entry.Message {
 		setMessage(entry)
 	}
+
+	setCaller(entry, 5)
 
 	data := ConvertToValue(entry.Data, TagName)
 	err = logger.PostWithTime(tag, entry.Time, data)
