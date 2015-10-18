@@ -70,6 +70,16 @@ func setCaller(entry *logrus.Entry, skip int) {
 		file = "???"
 		line = 0
 	} else {
+		i := 1
+		for strings.Contains(file, "logrus/") {
+			_, fileHigher, lineHigher, okHigher := runtime.Caller(skip + i)
+			if okHigher {
+				file = fileHigher
+				line = lineHigher
+			}
+			i++
+		}
+
 		lastSlash := strings.LastIndex(file, "/")
 		if lastSlash >= 0 {
 			folderSlash := strings.LastIndex(file[:lastSlash], "/")
